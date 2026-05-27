@@ -1,4 +1,30 @@
-creditcard.csv
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+
+# Local data and generated artifacts
+data/*.csv
+data/*.parquet
+data/*.xlsx
 *.csv
-creditcard.csv
-*.csv
+*.db
+*.sqlite
+*.sqlite3
+models/*.joblib
+models/*.pkl
+models/*.sav
+outputs/figures/*.png
+outputs/figures/*.jpg
+outputs/metrics/*.json
+
+# Local app configuration
+.env
+.flaskenv
+
+# OS/editor files
+.DS_Store
+__MACOSX/

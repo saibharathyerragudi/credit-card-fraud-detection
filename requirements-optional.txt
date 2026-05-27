@@ -1,0 +1,4 @@
+# Optional dependencies for the full experimental notebook.
+# Install these only if you want to rerun the deep learning and LightGBM sections.
+lightgbm>=4.3
+tensorflow>=2.15

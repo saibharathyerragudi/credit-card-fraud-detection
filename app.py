@@ -1,131 +1,101 @@
-import numpy as np
-from flask import Flask,request,jsonify,render_template
+from __future__ import annotations
+
+import os
+from pathlib import Path
+
 import joblib
-import sqlite3
 import pandas as pd
+from flask import Flask, jsonify, request
 
-import pandas as pd
-import numpy as np
-import pickle
-import sqlite3
-import random
+from src.fraud_detection.schema import FEATURE_COLUMNS
 
-import smtplib 
-from email.message import EmailMessage
-from datetime import datetime
 
+DEFAULT_MODEL_PATH = Path("models/fraud_detection_pipeline.joblib")
 
 app = Flask(__name__)
 
-@app.route('/')
-@app.route('/home')
-def home():
-	return render_template('home.html')
 
-@app.route('/logon')
-def logon():
-	return render_template('signup.html')
-
-@app.route('/login')
-def login():
-	return render_template('signin.html')
+def get_model_path() -> Path:
+    return Path(os.getenv("FRAUD_MODEL_PATH", DEFAULT_MODEL_PATH))
 
 
-@app.route("/signup")
-def signup():
-    global otp, username, name, email, number, password
-    username = request.args.get('user','')
-    name = request.args.get('name','')
-    email = request.args.get('email','')
-    number = request.args.get('mobile','')
-    password = request.args.get('password','')
-    otp = random.randint(1000,5000)
-    print(otp)
-    msg = EmailMessage()
-    msg.set_content("Your OTP is : "+str(otp))
-    msg['Subject'] = 'OTP'
-    msg['From'] = "evotingotp4@gmail.com"
-    msg['To'] = email
-    
-    
-    s = smtplib.SMTP('smtp.gmail.com', 587)
-    s.starttls()
-    s.login("evotingotp4@gmail.com", "xowpojqyiygprhgr")
-    s.send_message(msg)
-    s.quit()
-    return render_template("val.html")
-
-@app.route('/predict1', methods=['POST'])
-def predict1():
-    global otp, username, name, email, number, password
-    if request.method == 'POST':
-        message = request.form['message']
-        print(message)
-        if int(message) == otp:
-            print("TRUE")
-            con = sqlite3.connect('signup.db')
-            cur = con.cursor()
-            cur.execute("insert into `info` (`user`,`email`, `password`,`mobile`,`name`) VALUES (?, ?, ?, ?, ?)",(username,email,password,number,name))
-            con.commit()
-            con.close()
-            return render_template("signin.html")
-    return render_template("signup.html")
-
-@app.route("/signin")
-def signin():
-
-    mail1 = request.args.get('user','')
-    password1 = request.args.get('password','')
-    con = sqlite3.connect('signup.db')
-    cur = con.cursor()
-    cur.execute("select `user`, `password` from info where `user` = ? AND `password` = ?",(mail1,password1,))
-    data = cur.fetchone()
-
-    if data == None:
-        return render_template("signin.html")    
-
-    elif mail1 == str(data[0]) and password1 == str(data[1]):
-        return render_template("index.html")
-    else:
-        return render_template("signin.html")
+def load_model():
+    model_path = get_model_path()
+    if not model_path.exists():
+        raise FileNotFoundError(
+            f"Model artifact not found at {model_path}. "
+            "Run `python scripts/train_baseline.py --data data/creditcard.csv` first."
+        )
+    return joblib.load(model_path)
 
 
-@app.route('/index')
+def parse_features(payload: dict) -> pd.DataFrame:
+    if "features" not in payload:
+        raise ValueError("Request JSON must include a `features` object.")
+
+    features = payload["features"]
+    if not isinstance(features, dict):
+        raise ValueError("`features` must be a JSON object keyed by feature name.")
+
+    missing = [column for column in FEATURE_COLUMNS if column not in features]
+    if missing:
+        raise ValueError(f"Missing required features: {', '.join(missing)}")
+
+    ordered = {column: float(features[column]) for column in FEATURE_COLUMNS}
+    return pd.DataFrame([ordered], columns=FEATURE_COLUMNS)
+
+
+@app.get("/")
 def index():
-	return render_template('index.html')
+    return jsonify(
+        {
+            "project": "Credit Card Fraud Detection",
+            "endpoints": ["/health", "/metadata", "/predict"],
+            "model_path": str(get_model_path()),
+        }
+    )
 
 
+@app.get("/health")
+def health():
+    model_path = get_model_path()
+    return jsonify({"status": "ok", "model_available": model_path.exists()})
 
-@app.route('/predict',methods=['POST'])
+
+@app.get("/metadata")
+def metadata():
+    return jsonify(
+        {
+            "feature_count": len(FEATURE_COLUMNS),
+            "features": FEATURE_COLUMNS,
+            "target": "Class",
+            "positive_class": "Fraudulent transaction",
+        }
+    )
+
+
+@app.post("/predict")
 def predict():
+    try:
+        payload = request.get_json(force=True)
+        features = parse_features(payload)
+        model = load_model()
+        prediction = int(model.predict(features)[0])
+        probability = None
 
-    int_features= [float(x) for x in request.form.values()]
-    print(int_features,len(int_features))
-    final4=[np.array(int_features)]
+        if hasattr(model, "predict_proba"):
+            probability = float(model.predict_proba(features)[0][1])
 
-    #final_features = np.array([val1,val2,val3,val4,val5,val6,val7,val8,val9,val10,val11,val12,val13,val14,val15,val16,val17,val18]).reshape(1,-1)
-    model = joblib.load('model2.sav')
-    predict = model.predict(final4)
-    if predict == 1:
-        output = 'Fraudlent Transaction Happened based on the ML for the Given Input!'
-    elif predict == 0:
-        output = 'NON-Fraudlent Transaction Happened based on the ML for the Given Input!'
- 
-    return render_template('result.html',output=output)
+        return jsonify(
+            {
+                "prediction": prediction,
+                "label": "fraud" if prediction == 1 else "not_fraud",
+                "fraud_probability": probability,
+            }
+        )
+    except Exception as exc:
+        return jsonify({"error": str(exc)}), 400
 
-
-
-
-
-@app.route('/notebook')
-def notebook1():
-	return render_template('Notebook.html')
-
-
-
-@app.route('/about')
-def about():
-	return render_template('about.html')
 
 if __name__ == "__main__":
-    app.run()
+    app.run(host="127.0.0.1", port=5000, debug=False)
